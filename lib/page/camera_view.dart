@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 
 
 
@@ -52,7 +53,7 @@ class _CameraViewState extends State<CameraView> {
 
   @override
   void dispose() {
-    _stopLiveFeed();
+    _fncStopLiveFeed();
     super.dispose();
   }
 
@@ -61,6 +62,114 @@ class _CameraViewState extends State<CameraView> {
   Widget build(BuildContext context) {
     return const Placeholder();
   }
+
+  Widget _buildLiveFeedBody() {
+    if (_cameras.isEmpty) return Container();
+    if (_controller == null) return Container();
+    if (_controller?.value.isInitialized == false) return Container();
+
+    return Container(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: switch(_changingCameraLens) {
+              true => Center(child: Text("Changing camera lens")),
+              false => CameraPreview(
+                _controller!,
+                child: widget.customPaint,
+              ),
+            },
+          ),
+          _buildSwitchLiveCameraToggle(),
+          _buildDetectionViewModeToggle(),
+          _buildZoomControl(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetectionViewModeToggle() => Positioned(
+    bottom: 16,
+    left: 16,
+    child: SizedBox(
+      width: 50,
+      height: 50,
+      child: FloatingActionButton(
+        onPressed: widget.onDetectorViewModeChanged,
+        child: Icon(
+          Icons.photo_library_outlined,
+          size: 25,
+        ),
+      ),
+    )
+  );
+
+  Widget _buildSwitchLiveCameraToggle() => Positioned(
+    bottom: 16,
+    right: 16,
+    child: SizedBox(
+      width: 50,
+      height: 50,
+      child: FloatingActionButton(
+        onPressed: _fncSwitchLiveCamera,
+        child: Icon(
+          Platform.isIOS
+              ? Icons.flip_camera_ios_outlined
+              : Icons.flip_camera_android_outlined,
+          size: 25,
+        ),
+      ),
+    ),
+  );
+
+  Widget _buildZoomControl() => Positioned(
+    bottom: 16,
+    left: 0,
+    right: 0,
+    child: Align(
+      alignment: Alignment.bottomCenter,
+      child: SizedBox(
+        width: 250,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Slider(
+                value: _currentZoomLevel,
+                min: _minAvailableZoom,
+                max: _maxAvailableZoom,
+                activeColor: Colors.white,
+                inactiveColor: Colors.white30,
+                onChanged: (value) async {
+                  setState(() {
+                    _currentZoomLevel = value;
+                  });
+                  await _controller?.setZoomLevel(value);
+                },
+              ),
+            ),
+            Container(
+              width: 50,
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Padding(
+                padding: EdgeInsets.all(8),
+                child: Text(
+                  "${_currentZoomLevel.toStringAsFixed(1)}x",
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            )
+          ],
+        ),
+      ),
+    ),
+  );
 
   void _initialize() async {
     if (_cameras.isEmpty) {
@@ -75,11 +184,11 @@ class _CameraViewState extends State<CameraView> {
     }
 
     if (_cameras != -1) {
-      _startLiveFeed();
+      _fncStartLiveFeed();
     }
   }
 
-  Future _startLiveFeed() {
+  Future _fncStartLiveFeed() async {
     final camera = _cameras[_cameraIndex];
     _controller = CameraController(
       camera,
@@ -94,42 +203,94 @@ class _CameraViewState extends State<CameraView> {
       if (!mounted) {
         return;
       }
-    });
+      _controller?.getMinZoomLevel().then((value) {
+        _minAvailableZoom = value;
+        _currentZoomLevel = value;
+      });
 
-    _controller?.getMinZoomLevel().then((value) {
-      _minAvailableZoom = value;
-      _currentZoomLevel = value;
-    });
+      _controller?.getMaxZoomLevel().then((value) {
+        _maxAvailableZoom = value;
+      });
 
-    _controller?.getMaxZoomLevel().then((value) {
-      _maxAvailableZoom = value;
-    });
-
-    _controller?.startImageStream(_processCameraImage).then((value) {
-      if (widget.onCameraFeedReady != null) {
-        widget.onCameraFeedReady!();
-      }
-      if (widget.onCameraLensDirectionChanged != null) {
-        widget.onCameraLensDirectionChanged!(camera.lensDirection);
-      }
-      setState(() {});
+      _controller?.startImageStream(_fncProcessCameraImage).then((value) {
+        if (widget.onCameraFeedReady != null) {
+          widget.onCameraFeedReady!();
+        }
+        if (widget.onCameraLensDirectionChanged != null) {
+          widget.onCameraLensDirectionChanged!(camera.lensDirection);
+        }
+      });
+    setState(() {});
     });
   }
 
-  Future _stopLiveFeed() async {
+  Future _fncStopLiveFeed() async {
     await _controller?.stopImageStream();
     await _controller?.dispose();
     _controller = null;
   }
 
-  Future _switchLiveCamera() async {
+  Future _fncSwitchLiveCamera() async {
     setState(() => _changingCameraLens = true);
     _cameraIndex = (_cameraIndex + 1) % _cameras.length;
 
-    await _stopLiveFeed();
-    await _startLiveFeed();
+    await _fncStopLiveFeed();
+    await _fncStartLiveFeed();
     setState(() => _changingCameraLens = false);
   }
 
-  
+  InputImage? _funInputImageFromCameraIamge(CameraImage image) {
+    if (_controller == null) return null;
+
+    final camera = _cameras[_cameraIndex];
+    final sensorOrientation = camera.sensorOrientation;
+
+    InputImageRotation? rotation;
+    if (Platform.isIOS) {
+      rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    } else if (Platform.isAndroid) {
+      var rotationCompensation = _orientations[_controller!.value.deviceOrientation];
+      if (rotationCompensation == null) return null;
+      if (camera.lensDirection == CameraLensDirection.front) {
+        // front-facing
+        rotationCompensation = (sensorOrientation + rotationCompensation) % 360;
+      } else {
+        // back-facing
+        rotationCompensation = (sensorOrientation - rotationCompensation + 360) % 360;
+      }
+
+      rotation = InputImageRotationValue.fromRawValue(rotationCompensation);
+
+      if (rotation == null) return null;
+
+      final format = InputImageFormatValue.fromRawValue(image.format.raw);
+
+      if (format == null
+          || (Platform.isAndroid && format != InputImageFormat.nv21)
+          || (Platform.isIOS && format != InputImageFormat.bgra8888)) return null;
+
+      if (image.planes.length != 1) return null;
+      final plane = image.planes.first;
+      return InputImage.fromBytes(
+        bytes: plane.bytes,
+        metadata: InputImageMetadata(
+          size: Size(
+            image.width.toDouble(),
+            image.height.toDouble(),
+          ),
+          rotation: rotation,
+          format: format,
+          bytesPerRow: plane.bytesPerRow,
+        ),
+      );
+    }
+  }
+
+  void _fncProcessCameraImage(CameraImage image) {
+    final inputImage = _funInputImageFromCameraIamge(image);
+    if (inputImage == null) return null;
+
+    widget.onImage(inputImage);
+  }
+
 }
