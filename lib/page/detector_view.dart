@@ -1,6 +1,9 @@
 import 'package:barcode_scanner/main.dart';
+import 'package:barcode_scanner/page/camera_view.dart';
+import 'package:barcode_scanner/page/gallery_page.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 
 
 
@@ -8,11 +11,13 @@ class DetectorView extends StatefulWidget {
   const DetectorView({
     required this.title,
     required this.onImage,
+    this.text,
     this.customPaint,
     this.initialDetectionMode = DetectorViewMode.gallery,
+    this.initialCameraLensDirection = CameraLensDirection.back,
+    this.onCameraFeedReady,
     this.onDetectorViewModeChanged,
     this.onCameraLensDirectionChanged,
-    this.initialCameraLensDirection = CameraLensDirection.back,
 
 
     super.key
@@ -20,8 +25,10 @@ class DetectorView extends StatefulWidget {
 
   final String title;
   final CustomPaint? customPaint;
+  final String? text;
   final DetectorViewMode initialDetectionMode;
   final Function(InputImage inputImage) onImage;
+  final Function()? onCameraFeedReady;
   final Function(DetectorViewMode mode)? onDetectorViewModeChanged;
   final Function(CameraLensDirection direction)? onCameraLensDirectionChanged;
   final CameraLensDirection initialCameraLensDirection;
@@ -47,8 +54,21 @@ class _DetectorViewState extends State<DetectorView> {
   @override
   Widget build(BuildContext context) {
     return switch(_mode) {
-      DetectorViewMode.liveFeed =>
-    }
+      DetectorViewMode.liveFeed => CameraView(
+        customPaint: widget.customPaint,
+        onImage: widget.onImage,
+        onCameraFeedReady: widget.onCameraFeedReady,
+        onDetectorViewModeChanged: _onDetectorViewModeChanged,
+        initialCameraLensDirection: widget.initialCameraLensDirection,
+        onCameraLensDirectionChanged: widget.onCameraLensDirectionChanged,
+      ),
+    _ => GalleryView(
+          title: widget.title,
+          text: widget.text,
+          onImage: widget.onImage,
+          onDetectorViewModeChanged: _onDetectorViewModeChanged,
+        )
+    };
   }
 
   void _onDetectorViewModeChanged() {

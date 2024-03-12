@@ -50,6 +50,12 @@ class _CameraViewState extends State<CameraView> {
     DeviceOrientation.landscapeRight : 270,
   };
 
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
 
   @override
   void dispose() {
